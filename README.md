@@ -2,6 +2,7 @@
 
 **SmartLex-S** is a lightweight, transparent Python desktop application for semantic document retrieval inspired by compiler design principles (lexical analysis, symbol tables, syntactic token proximity, and scope coverage).
 
+<<<<<<< HEAD
 It features a **two-page desktop interface** built in **Tkinter**, using **SQLite** for persistent local storage, extracting text from **PDF, DOCX, and TXT** documents, and computing a fully transparent multi-factor ranking score without relying on paid APIs, cloud services, or heavy AI models.
 
 ---
@@ -21,6 +22,9 @@ It features a **two-page desktop interface** built in **Tkinter**, using **SQLit
    - **Header**: Active query, match count badge, and a prominent `← EDIT QUERY` button that returns to Page 1 with query and state preserved.
    - **Left Column (52%)**: Ranked results table (`ttk.Treeview`) with `RANK`, `DOCUMENT FILE`, `TYPE`, `SCORE`, and factor metrics ($K, S, R, C$).
    - **Right Column (48%)**: Evidence card, final score display, real matched keywords pills, best-matching sentence snippet with keyword highlighting, and step-by-step transparent formula breakdown.
+=======
+It runs locally with **Tkinter**, uses **SQLite** for persistent storage, extracts text from **PDF, DOCX, and TXT** documents, and computes a fully transparent multi-factor ranking score without relying on paid APIs, cloud services, or heavy AI models.
+>>>>>>> origin/main
 
 ---
 
@@ -38,7 +42,11 @@ $$\text{FinalScore} = 0.40 \cdot K + 0.25 \cdot S + 0.20 \cdot R + 0.15 \cdot C$
 | :---: | :--- | :---: | :--- | :--- |
 | **K** | **Query Coverage** | **40%** | Symbol Presence | Ratio of unique query terms present anywhere in the document symbol table ($K = \frac{|Q \cap D|}{|Q|}$). |
 | **S** | **Local Similarity** | **25%** | Term Saturation & Density | Length-normalized sublinear term frequency (BM25-lite) measuring how densely query tokens populate the document. |
+<<<<<<< HEAD
 | **R** | **Relationship Match** | **20%** | Syntactic Proximity | Checks if adjacent query token pairs appear within a localized clause/sentence window ($\le 15$ words). |
+=======
+| **R** | **Relationship Match** | **20%** | Syntactic Proximity | Checks if adjacent query token pairs appear within a localized window ($\le 6$ words) in the text. |
+>>>>>>> origin/main
 | **C** | **Best-Sentence Coverage** | **15%** | Scope / Statement Match | Fraction of query terms co-located inside the single best matching sentence. Also extracted as evidence snippet. |
 
 > **Note**: All factors $K, S, R, C$ are strictly bounded in the range $[0.0, 1.0]$. The resulting `FinalScore` is always in $[0.0, 1.0]$ ($0\% - 100\%$) and is accompanied by a transparent breakdown in the UI.
@@ -50,6 +58,7 @@ $$\text{FinalScore} = 0.40 \cdot K + 0.25 \cdot S + 0.20 \cdot R + 0.15 \cdot C$
 ```
 SmartLexS/
 │
+<<<<<<< HEAD
 ├── main.py                     # Two-page desktop application (Tkinter / ttk)
 ├── requirements.txt            # Dependency specification (pypdf, python-docx)
 ├── README.md                   # Complete documentation and evaluation guide
@@ -57,6 +66,14 @@ SmartLexS/
 ├── test_gui.py                 # Automated two-page regression test suite (11 test scenarios)
 ├── smartlex_index.db           # Persistent SQLite database
 ├── backup_pre_twopage/         # Backup of working files prior to redesign
+=======
+├── main.py                     # Desktop GUI application (Tkinter / ttk)
+├── requirements.txt            # Dependency specification (pypdf, python-docx)
+├── README.md                   # Complete documentation and evaluation guide
+├── test_smartlex.py            # Automated test suite (indexing, ranking, error handling)
+├── test_gui.py                 # Automated UI verification script
+├── smartlex_index.db           # Persistent SQLite database
+>>>>>>> origin/main
 │
 ├── smartlex/
 │   ├── __init__.py             # Package init
@@ -84,6 +101,7 @@ Open **Command Prompt** (`cmd.exe`) or **PowerShell** in the project directory:
 pip install -r requirements.txt
 ```
 
+<<<<<<< HEAD
 *(Installs `pypdf` for PDF extraction and `python-docx` for Word documents).*
 
 ### 3. Run Automated Tests
@@ -94,6 +112,12 @@ python test_gui.py
 ```
 
 To run the core engine unit tests:
+=======
+*(This installs `pypdf` for PDF extraction and `python-docx` for Word documents).*
+
+### 3. Run Automated Tests (Optional)
+To verify database indexing, retrieval, and ranking logic:
+>>>>>>> origin/main
 
 ```powershell
 python test_smartlex.py
@@ -106,6 +130,7 @@ python main.py
 
 ---
 
+<<<<<<< HEAD
 ## 🖥️ Faculty Demonstration Walkthrough
 
 When presenting SmartLex-S to an evaluator, follow these steps:
@@ -137,3 +162,30 @@ When presenting SmartLex-S to an evaluator, follow these steps:
    - Searching for an unindexed term displays an informative empty state with a direct button back to editing.
 8. **Persistence Demonstration**:
    - Close the app and relaunch it (`python main.py`). All indexed files and symbol tables remain intact in SQLite without needing re-indexing.
+=======
+## 🖥️ Faculty Demonstration Guide
+
+When presenting SmartLex-S to an evaluator, follow these steps:
+
+1. **Launch the Application**: Run `python main.py`.
+2. **Index Demo Documents**:
+   - Click the **⚡ Index Demo Docs** button at the top right.
+   - SmartLex-S will automatically load the three sample documents covering:
+     1. Lexical Analysis
+     2. Syntax Analysis & Parsing
+     3. Code Optimization
+3. **Execute Compiler-Themed Queries**:
+   - **Query 1**: `lexical analysis tokens scanner`
+     - Observe: `lexical_analysis.txt` achieves the highest score (~0.75+).
+     - Click the row to inspect the **Evidence Panel**: view the highlighted sentence and the transparent $0.40K + 0.25S + 0.20R + 0.15C$ calculation.
+   - **Query 2**: `syntax analysis parsing abstract syntax tree`
+     - Observe: `syntax_analysis.txt` ranks #1 (~0.85+).
+   - **Query 3**: `dead code elimination optimization basic blocks`
+     - Observe: `code_optimization.txt` ranks #1 (~0.83+).
+4. **Import Custom Documents**:
+   - Click **➕ Add Documents** to import your own `.pdf`, `.docx`, or `.txt` files.
+   - Notice instant extraction and persistent SQLite indexing.
+5. **Demonstrate Friendly Error Handling**:
+   - Search for a term that does not exist (e.g. `quantum thermodynamics`): a friendly message explains that no documents matched.
+   - Attempting to import an unreadable or corrupt file presents a descriptive notification rather than crashing.
+>>>>>>> origin/main
