@@ -1172,11 +1172,7 @@ class SmartLexApp:
         """Validate query, execute 4-part ranking retrieval pipeline, and navigate to Page 2."""
         query = self.query_var.get().strip()
         if not query:
-<<<<<<< HEAD
             self.search_validation_lbl.config(text="[!] Please enter search terms to retrieve documents.")
-=======
-            self.search_validation_lbl.config(text="⚠ Please enter search terms to retrieve documents.")
->>>>>>> origin/main
             self.query_entry.focus()
             return
 

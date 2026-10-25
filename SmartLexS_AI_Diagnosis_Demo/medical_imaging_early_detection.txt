@@ -1,0 +1,9 @@
+Title: Medical Imaging and Early Disease Detection
+
+Medical imaging produces visual evidence that can help clinicians detect disease. Deep learning models can analyze images such as mammograms, retinal photographs, CT scans, and chest radiographs to identify regions that may require closer review.
+
+In screening workflows, an AI system may prioritize suspicious studies so that urgent cases receive attention sooner. This can reduce repetitive review work and may help detect subtle patterns that are difficult to notice consistently. The practical benefit depends on the disease, the imaging method, the patient population, and how the model is integrated into clinical workflow.
+
+A positive model result can be a false alarm, while a negative result does not guarantee that disease is absent. Sensitivity, specificity, calibration, and performance across demographic groups should be evaluated before clinical use. Results should also be compared with appropriate reference standards and assessed at the intended hospital or screening site.
+
+AI-assisted imaging works best when its findings are combined with clinical context. A radiologist or other qualified clinician remains responsible for interpreting the images and determining whether further testing is necessary.

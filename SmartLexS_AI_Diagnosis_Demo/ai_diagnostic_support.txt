@@ -1,0 +1,9 @@
+Title: AI Diagnostic Support in Clinical Practice
+
+Artificial intelligence can support clinical diagnosis by identifying patterns in medical images, laboratory results, and patient histories. A diagnostic support system may compare a patient's findings with patterns learned from carefully curated clinical datasets and highlight possible conditions for a clinician to review.
+
+For example, an AI model trained on chest X-rays may flag image features associated with pneumonia. The model's output is not a final diagnosis: clinicians must consider symptoms, examination findings, medical history, and other tests before deciding on treatment.
+
+AI tools can improve consistency and help clinicians prioritize cases, especially when workloads are high. Their performance depends on data quality, representative training examples, external validation, and appropriate monitoring after deployment. A system may perform less reliably when used with patient groups or imaging equipment that differ from its training data.
+
+The safest use of AI is as decision support rather than a replacement for professional judgment. Clinical teams should be able to inspect relevant evidence, understand known limitations, and override recommendations when the available evidence supports a different conclusion.
