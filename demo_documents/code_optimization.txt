@@ -1,0 +1,14 @@
+SmartLex-S Document: Intermediate Code Generation and Code Optimization
+
+Intermediate code generation transforms abstract syntax trees into an intermediate representation (IR) independent of specific hardware architecture.
+A widely adopted intermediate format is Three-Address Code (TAC), which breaks complex expressions into sequential instructions with at most three operands.
+Control flow graphs (CFG) decompose intermediate representations into basic blocks to facilitate semantic program analysis.
+
+Code optimization seeks to transform intermediate code so that target machine binaries run faster, consume fewer CPU cycles, and demand less memory.
+Optimization passes are partitioned into machine-independent optimizations and machine-dependent register allocation routines.
+Local optimizations operate within a single basic block and include constant folding, constant propagation, and dead code elimination.
+Global optimizations inspect entire control flow graphs to perform common subexpression elimination, loop invariant code motion, and induction variable strength reduction.
+
+Data flow analysis calculates available expressions, reaching definitions, and live variables across basic blocks using forward and backward iterative equations.
+Effective peephole optimization scans short instruction windows to replace redundant store-load operations and simplify algebraic identities.
+The optimized intermediate representation is finally forwarded to the code generator for target assembly synthesis and instruction scheduling.

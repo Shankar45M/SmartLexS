@@ -1,0 +1,14 @@
+SmartLex-S Document: Lexical Analysis in Compiler Design
+
+Lexical analysis is the initial phase of a modern compiler, commonly referred to as the scanner or lexer.
+The primary purpose of the lexical analyzer is to convert a sequence of source code characters into a stream of meaningful tokens.
+Each token produced by the lexer contains a token name and an optional attribute value, such as identifiers, keywords, operators, and literals.
+
+During tokenization, the lexical analyzer strips out redundant whitespace, tabs, and comments from the input program.
+Regular expressions are formally used to specify the patterns of valid tokens in the programming language grammar.
+Deterministic finite automata (DFA) and non-deterministic finite automata (NFA) are the underlying state machines utilized to recognize these regular patterns.
+Tools like Lex and Flex automatically generate transition tables and scanner code from regular expression rules.
+
+The lexical analyzer also maintains the compiler symbol table by inserting newly encountered identifier symbols and attributes.
+When an unrecognized character sequence is detected, the lexer reports a lexical error and attempts error recovery using panic mode or token deletion.
+Efficient token stream generation is critical because the scanner processes every single character in the input source file.

@@ -1,0 +1,14 @@
+SmartLex-S Document: Syntax Analysis and Parsing Techniques
+
+Syntax analysis, widely known as parsing, forms the second major phase of a compiler pipeline.
+The parser takes the stream of tokens produced by the lexical analyzer and checks whether the token order conforms to the context-free grammar.
+The fundamental output of syntax analysis is a parse tree or an abstract syntax tree (AST) that represents the hierarchical structure of program expressions.
+
+Context-free grammars (CFG) are defined using Backus-Naur Form (BNF) with terminal symbols, non-terminal variables, and production rules.
+Parsing techniques are broadly divided into two major strategies: top-down parsing and bottom-up parsing.
+Top-down parsers, including recursive descent parsers and LL(1) predictive parsers, build the parse tree starting from the root start symbol toward the leaves.
+LL(1) grammars require computing FIRST and FOLLOW sets to ensure non-backtracking deterministic table lookups.
+
+Bottom-up parsers, such as shift-reduce parsers, LR(0), SLR(1), and LALR(1) parsers, reconstruct the parse tree from leaves up to the root.
+Tools such as Yacc and Bison synthesize shift-reduce state machines to construct concrete syntax trees and evaluate grammar actions.
+When grammatical syntax errors occur, parsers invoke phrase-level error recovery to resume parsing without terminating compilation prematurely.
