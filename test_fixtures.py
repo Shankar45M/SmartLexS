@@ -52,10 +52,10 @@ EVALUATION_QUERIES = [
 ]
 
 def record_baseline_benchmarks(db_path: str = "smartlex_index.db") -> List[Dict[str, Any]]:
-    """Runs the evaluation queries against the current SmartLexEngine and records baseline metrics."""
+    """Runs evaluation queries comparing Baseline (4-factor) vs Hybrid (5-factor) retrieval."""
     engine = SmartLexEngine(db_path=db_path)
     
-    # Ensure demo documents are present in the database
+    # Ensure demo documents are present in the database and embedded
     docs = engine.get_indexed_documents()
     if len(docs) < 3:
         demo_dir = os.path.join(os.path.dirname(__file__), "demo_documents")
@@ -63,11 +63,13 @@ def record_baseline_benchmarks(db_path: str = "smartlex_index.db") -> List[Dict[
             fpath = os.path.join(demo_dir, f)
             if os.path.exists(fpath):
                 engine.index_document(fpath)
+    else:
+        engine.backfill_embeddings()
 
     results_summary = []
     
     print("\n" + "=" * 80)
-    print("SMARTLEX-S BASELINE BENCHMARK EVALUATION")
+    print("SMARTLEX-S RETRIEVAL BENCHMARK EVALUATION (BASELINE vs HYBRID)")
     print("=" * 80)
 
     for item in EVALUATION_QUERIES:
@@ -76,51 +78,53 @@ def record_baseline_benchmarks(db_path: str = "smartlex_index.db") -> List[Dict[
         category = item["category"]
         expected = item["expected_top_doc"]
         
-        matches = engine.search(q_str)
+        matches_hybrid = engine.search(q_str, hybrid_scoring=True)
+        matches_baseline = engine.search(q_str, hybrid_scoring=False)
         
         print(f"\n[{q_id}] Category: {category}")
         print(f"Query: \"{q_str}\"")
-        print(f"Matches count: {len(matches)}")
         
-        if matches:
-            top = matches[0]
-            top_file = top["filename"]
-            score = top["final_score"]
-            k = top.get("score_k", 0.0)
-            s = top.get("score_s", 0.0)
-            r = top.get("score_r", 0.0)
-            c = top.get("score_c", 0.0)
-            print(f"  Top Result: {top_file} | Score: {score:.4f} (K={k:.2f}, S={s:.2f}, R={r:.2f}, C={c:.2f})")
-            print(f"  Matched Keywords: {top['matched_keywords']}")
-            print(f"  Snippet: {top['snippet'][:85]}...")
-            success = (expected is None) or (top_file == expected)
-            print(f"  Expected '{expected}' matched top: {success}")
+        if matches_hybrid:
+            top_h = matches_hybrid[0]
+            top_h_file = top_h["filename"]
+            score_h = top_h["final_score"]
+            k = top_h.get("score_k", 0.0)
+            s = top_h.get("score_s", 0.0)
+            r = top_h.get("score_r", 0.0)
+            c = top_h.get("score_c", 0.0)
+            e = top_h.get("score_e", 0.0)
+            success_h = (expected is None) or (top_h_file == expected)
+            print(f"  Hybrid Top Result : {top_h_file} | Score: {score_h:.4f} (K={k:.2f}, S={s:.2f}, R={r:.2f}, C={c:.2f}, E={e:.2f})")
+            print(f"  Snippet: {top_h['snippet'][:85]}...")
         else:
-            top_file = None
-            score = 0.0
-            print("  Top Result: None (Zero matches)")
-            success = (expected is None)
-            print(f"  Expected '{expected}' matched top: {success}")
+            top_h_file = None
+            score_h = 0.0
+            success_h = (expected is None)
+
+        top_b_score = matches_baseline[0]["final_score"] if matches_baseline else 0.0
+        top_b_file = matches_baseline[0]["filename"] if matches_baseline else None
 
         results_summary.append({
             "id": q_id,
             "category": category,
             "query": q_str,
             "expected_top_doc": expected,
-            "top_doc": top_file,
-            "final_score": score,
-            "matches_count": len(matches),
-            "success": success
+            "baseline_score": top_b_score,
+            "baseline_doc": top_b_file,
+            "hybrid_score": score_h,
+            "hybrid_doc": top_h_file,
+            "matches_count": len(matches_hybrid),
+            "success": success_h
         })
 
-    print("\n" + "=" * 80)
-    print("BASELINE SUMMARY TABLE")
-    print("=" * 80)
-    print(f"{'ID':<12} | {'Category':<28} | {'Matches':<7} | {'Top Document':<22} | {'Score':<8} | {'Target Match'}")
-    print("-" * 90)
+    print("\n" + "=" * 96)
+    print("COMPARATIVE BENCHMARK SUMMARY (BASELINE 4-FACTOR vs HYBRID 5-FACTOR)")
+    print("=" * 96)
+    print(f"{'ID':<12} | {'Category':<28} | {'Target Expected':<22} | {'Base Score':<10} | {'Hybrid Score':<12} | {'Status'}")
+    print("-" * 96)
     for res in results_summary:
-        print(f"{res['id']:<12} | {res['category']:<28} | {res['matches_count']:<7} | {str(res['top_doc']):<22} | {res['final_score']:<8.4f} | {'PASS' if res['success'] else 'DEFICIT (Expected)'}")
-    print("=" * 80)
+        print(f"{res['id']:<12} | {res['category']:<28} | {str(res['expected_top_doc']):<22} | {res['baseline_score']:<10.4f} | {res['hybrid_score']:<12.4f} | {'PASS' if res['success'] else 'FAIL'}")
+    print("=" * 96)
     
     return results_summary
 

@@ -311,6 +311,20 @@ class SmartLexApp:
         )
         self.home_doc_badge.pack(side=tk.RIGHT)
 
+        self.home_ai_badge = tk.Label(
+            p1_right_box,
+            text="● HYBRID RETRIEVAL ACTIVE",
+            font=(self.FONT_AGENCY, 10, "bold"),
+            fg="#95C27E",
+            bg=self.COLOR_ELEVATED,
+            padx=10,
+            pady=5,
+            highlightbackground=self.COLOR_SEPARATOR,
+            highlightthickness=1,
+            bd=0
+        )
+        self.home_ai_badge.pack(side=tk.RIGHT, padx=(0, 8))
+
         # Subtle gold divider
         p1_sep = tk.Frame(self.page_home, height=1, bg=self.COLOR_SEPARATOR)
         p1_sep.pack(fill=tk.X, padx=28, pady=(0, 16))
@@ -543,7 +557,7 @@ class SmartLexApp:
 
         formula_preview_lbl = tk.Label(
             footer_card,
-            text="Transparent 4-Factor Ranking Formula: FinalScore = 0.40K + 0.25S + 0.20R + 0.15C",
+            text="Transparent Hybrid 5-Factor Formula: FinalScore = 0.25K + 0.15S + 0.15R + 0.15C + 0.30E",
             font=(self.FONT_AGENCY, 10),
             fg=self.COLOR_GOLD,
             bg=self.COLOR_BG
@@ -676,7 +690,7 @@ class SmartLexApp:
 
         self.tree = ttk.Treeview(
             self.tree_container,
-            columns=("rank", "name", "type", "final", "k", "s", "r", "c"),
+            columns=("rank", "name", "type", "final", "k", "s", "r", "c", "e"),
             show="headings",
             selectmode="browse"
         )
@@ -689,15 +703,17 @@ class SmartLexApp:
         self.tree.heading("s", text="S (SIM)")
         self.tree.heading("r", text="R (REL)")
         self.tree.heading("c", text="C (SENT)")
+        self.tree.heading("e", text="E (SEM)")
 
-        self.tree.column("rank", width=46, anchor="center")
-        self.tree.column("name", width=190, anchor="w")
-        self.tree.column("type", width=52, anchor="center")
-        self.tree.column("final", width=75, anchor="center")
-        self.tree.column("k", width=58, anchor="center")
-        self.tree.column("s", width=58, anchor="center")
-        self.tree.column("r", width=58, anchor="center")
-        self.tree.column("c", width=58, anchor="center")
+        self.tree.column("rank", width=44, anchor="center")
+        self.tree.column("name", width=180, anchor="w")
+        self.tree.column("type", width=48, anchor="center")
+        self.tree.column("final", width=70, anchor="center")
+        self.tree.column("k", width=54, anchor="center")
+        self.tree.column("s", width=54, anchor="center")
+        self.tree.column("r", width=54, anchor="center")
+        self.tree.column("c", width=54, anchor="center")
+        self.tree.column("e", width=54, anchor="center")
 
         tree_y_scroll = ttk.Scrollbar(self.tree_container, orient=tk.VERTICAL, command=self.tree.yview)
         tree_x_scroll = ttk.Scrollbar(self.tree_container, orient=tk.HORIZONTAL, command=self.tree.xview)
@@ -775,7 +791,7 @@ class SmartLexApp:
 
         formula_tag = tk.Label(
             right_title_row,
-            text="0.40K + 0.25S + 0.20R + 0.15C",
+            text="0.25K + 0.15S + 0.15R + 0.15C + 0.30E",
             font=(self.FONT_AGENCY, 9),
             fg=self.COLOR_TEXT_SECONDARY,
             bg=self.COLOR_SURFACE
@@ -811,7 +827,21 @@ class SmartLexApp:
             bg=self.COLOR_ELEVATED,
             anchor="w"
         )
-        self.res_score_lbl.pack(fill=tk.X, pady=(2, 4))
+        self.res_score_lbl.pack(fill=tk.X, pady=(2, 2))
+
+        # 5-Factor Mini Badges Strip
+        self.res_factors_box = tk.Frame(self.res_meta_card, bg=self.COLOR_ELEVATED)
+        self.res_factors_box.pack(fill=tk.X, pady=(0, 4))
+
+        self.res_factors_lbl = tk.Label(
+            self.res_factors_box,
+            text="SIGNALS: K: —  |  S: —  |  R: —  |  C: —  |  E: —",
+            font=(self.FONT_AGENCY, 10),
+            fg="#C9AD70",
+            bg=self.COLOR_ELEVATED,
+            anchor="w"
+        )
+        self.res_factors_lbl.pack(side=tk.LEFT)
 
         # Matched Keywords Container
         kw_box = tk.Frame(self.res_meta_card, bg=self.COLOR_ELEVATED)
@@ -850,11 +880,11 @@ class SmartLexApp:
         snippet_lbl.pack(side=tk.LEFT)
 
         snippet_container = tk.Frame(self.p2_right_panel, bg=self.COLOR_SURFACE)
-        snippet_container.pack(fill=tk.X, pady=(0, 10))
+        snippet_container.pack(fill=tk.X, pady=(0, 8))
 
         self.snippet_text = tk.Text(
             snippet_container,
-            height=5,
+            height=4,
             font=(self.FONT_READING, 9),
             wrap="word",
             relief="flat",
@@ -881,6 +911,55 @@ class SmartLexApp:
         )
         self.snippet_text.configure(state="disabled")
 
+        # Grounded Synthesis / AI Explanation Box
+        synthesis_header = tk.Frame(self.p2_right_panel, bg=self.COLOR_SURFACE)
+        synthesis_header.pack(fill=tk.X, pady=(2, 4))
+
+        synthesis_lbl = tk.Label(
+            synthesis_header,
+            text="GROUNDED SYNTHESIS / AI EXPLANATION:",
+            font=(self.FONT_AGENCY, 10, "bold"),
+            fg=self.COLOR_GOLD,
+            bg=self.COLOR_SURFACE
+        )
+        synthesis_lbl.pack(side=tk.LEFT)
+
+        self.synthesis_status_lbl = tk.Label(
+            synthesis_header,
+            text="OLLAMA OFFLINE (EXTRACTIVE)",
+            font=(self.FONT_AGENCY, 8, "bold"),
+            fg=self.COLOR_TEXT_SECONDARY,
+            bg=self.COLOR_ELEVATED,
+            padx=6,
+            pady=1
+        )
+        synthesis_status_lbl_pack = self.synthesis_status_lbl.pack(side=tk.RIGHT)
+
+        synthesis_container = tk.Frame(self.p2_right_panel, bg=self.COLOR_SURFACE)
+        synthesis_container.pack(fill=tk.X, pady=(0, 8))
+
+        self.synthesis_text = tk.Text(
+            synthesis_container,
+            height=3,
+            font=(self.FONT_READING, 9, "italic"),
+            wrap="word",
+            relief="flat",
+            bd=0,
+            bg="#0A0906",
+            fg="#E6D3A3",
+            insertbackground=self.COLOR_GOLD,
+            highlightthickness=1,
+            highlightbackground=self.COLOR_SEPARATOR,
+            padx=10,
+            pady=6
+        )
+        self.synthesis_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        synth_scroll = ttk.Scrollbar(synthesis_container, orient=tk.VERTICAL, command=self.synthesis_text.yview)
+        synth_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.synthesis_text.configure(yscrollcommand=synth_scroll.set)
+        self.synthesis_text.configure(state="disabled")
+
         # Score Explanation Box
         explanation_header = tk.Frame(self.p2_right_panel, bg=self.COLOR_SURFACE)
         explanation_header.pack(fill=tk.X, pady=(2, 4))
@@ -899,7 +978,7 @@ class SmartLexApp:
 
         self.explanation_text = tk.Text(
             explanation_container,
-            height=9,
+            height=6,
             font=(self.FONT_CODE, 9),
             wrap="word",
             relief="flat",
@@ -984,10 +1063,15 @@ class SmartLexApp:
             self._clear_evidence_panel()
             self.res_doc_name.config(text="No Relevant Documents Found")
             self.res_score_lbl.config(text="FINAL SCORE : 0.0000")
+            self.res_factors_lbl.config(text="SIGNALS: K: —  |  S: —  |  R: —  |  C: —  |  E: —")
             self.res_keywords_lbl.config(text="None")
             self._update_text_widget(
                 self.snippet_text,
                 "No matching sentence found in the document library for this query."
+            )
+            self._update_text_widget(
+                self.synthesis_text,
+                "No matching evidence to synthesize."
             )
             self._update_text_widget(
                 self.explanation_text,
@@ -1014,7 +1098,8 @@ class SmartLexApp:
                         f"{res['score_k']:.2f}",
                         f"{res['score_s']:.2f}",
                         f"{res['score_r']:.2f}",
-                        f"{res['score_c']:.2f}"
+                        f"{res['score_c']:.2f}",
+                        f"{res.get('score_e', 0.0):.2f}"
                     )
                 )
 
@@ -1232,12 +1317,24 @@ class SmartLexApp:
         self.res_score_lbl.config(
             text=f"FINAL SCORE : {res['final_score']:.4f}  ({res['final_score']*100:.1f}%)"
         )
+        self.res_factors_lbl.config(
+            text=f"SIGNALS: K={res['score_k']:.2f}  S={res['score_s']:.2f}  R={res['score_r']:.2f}  C={res['score_c']:.2f}  E={res.get('score_e', 0.0):.2f}"
+        )
         self.res_keywords_lbl.config(text=matched_str)
 
         # Update Snippet with query keyword highlighting
         snippet_content = res["snippet"] if res["snippet"] else "No specific sentence matched."
         self._update_text_widget(self.snippet_text, snippet_content)
         self._highlight_keywords(self.snippet_text, res["matched_keywords"])
+
+        # Update Grounded Synthesis / AI Explanation
+        synth_text = self.engine.synthesize_explanation(self.current_query, res)
+        self._update_text_widget(self.synthesis_text, synth_text)
+        from smartlex.llm import OllamaClient
+        client = OllamaClient.get_instance()
+        self.synthesis_status_lbl.config(
+            text="OLLAMA ONLINE" if client.is_available() else "OLLAMA OFFLINE (EXTRACTIVE)"
+        )
 
         # Update Explanation
         self._update_text_widget(self.explanation_text, res["explanation"])
@@ -1270,8 +1367,10 @@ class SmartLexApp:
         """Reset the evidence text widgets."""
         self.res_doc_name.config(text="No document selected")
         self.res_score_lbl.config(text="FINAL SCORE : —")
+        self.res_factors_lbl.config(text="SIGNALS: K: —  |  S: —  |  R: —  |  C: —  |  E: —")
         self.res_keywords_lbl.config(text="None")
         self._update_text_widget(self.snippet_text, "")
+        self._update_text_widget(self.synthesis_text, "")
         self._update_text_widget(self.explanation_text, "")
 
 

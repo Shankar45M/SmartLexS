@@ -1,7 +1,8 @@
 """
 SmartLex-S Core Retrieval Engine.
-Implements SQLite persistent indexing and the compiler-inspired transparent ranking formula:
-FinalScore = 0.40 * K + 0.25 * S + 0.20 * R + 0.15 * C
+Implements SQLite persistent indexing and the hybrid transparent ranking formula:
+FinalScore = 0.25 * K + 0.15 * S + 0.15 * R + 0.15 * C + 0.30 * E
+(Supports baseline 4-factor formula when hybrid_scoring=False).
 """
 
 import os
@@ -16,6 +17,8 @@ from smartlex.extractors import (
     ExtractionError
 )
 from smartlex.embeddings import EmbeddingEngine
+from smartlex.synonyms import SynonymEngine
+from smartlex.llm import OllamaClient
 
 
 class SmartLexEngine:
@@ -231,7 +234,26 @@ class SmartLexEngine:
                 return float(row["avg_len"])
             return 100.0
 
-    def search(self, query_string: str, hybrid_scoring: bool = False) -> List[Dict[str, Any]]:
+    def get_llm_status(self) -> str:
+        """Returns the current status string of local Ollama LLM integration."""
+        return OllamaClient.get_instance().get_status_text()
+
+    def synthesize_explanation(self, query: str, result: Dict[str, Any]) -> str:
+        """
+        Generates a grounded natural language explanation for a search result item.
+        Uses local Ollama if available, otherwise cleanly falls back to extractive evidence.
+        """
+        client = OllamaClient.get_instance()
+        filename = result.get("filename", "document")
+        snippet = result.get("snippet", "")
+        return client.synthesize_explanation(query, filename, snippet)
+
+    def search(
+        self,
+        query_string: str,
+        hybrid_scoring: bool = True,
+        synthesize_ai: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         Executes compiler-inspired semantic retrieval for a natural-language query.
         Calculates lexical factors (K, S, R, C) and semantic factor (E).
@@ -259,6 +281,18 @@ class SmartLexEngine:
 
         avg_doc_len = self._get_average_doc_length()
 
+        # Synonym expansion via SynonymEngine
+        syn_engine = SynonymEngine.get_instance()
+        synonym_map: Dict[str, List[str]] = {}
+        all_search_tokens_set = set(unique_query_terms)
+        if syn_engine.is_available():
+            synonym_map = syn_engine.expand_query_tokens(unique_query_terms, max_per_token=3)
+            for syn_list in synonym_map.values():
+                for s in syn_list:
+                    for st in tokenize_text(s, remove_stopwords=True):
+                        all_search_tokens_set.add(st)
+        all_search_tokens_list = list(all_search_tokens_set)
+
         # Semantic query vector computation
         emb_engine = EmbeddingEngine.get_instance()
         query_vec = emb_engine.encode_text(raw_query) if emb_engine.is_available() else None
@@ -266,15 +300,15 @@ class SmartLexEngine:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # 1. Lexical candidate selection
-            placeholders = ",".join("?" for _ in unique_query_terms)
+            # 1. Lexical candidate selection (includes exact terms and synonym expansions)
+            placeholders = ",".join("?" for _ in all_search_tokens_list)
             sql = f"""
                 SELECT DISTINCT d.id, d.filename, d.filepath, d.file_type, d.raw_text, d.token_count
                 FROM documents d
                 JOIN doc_tokens dt ON d.id = dt.doc_id
                 WHERE dt.token IN ({placeholders})
             """
-            cursor.execute(sql, unique_query_terms)
+            cursor.execute(sql, all_search_tokens_list)
             candidate_map: Dict[int, Dict[str, Any]] = {row["id"]: dict(row) for row in cursor.fetchall()}
 
             # 2. Semantic candidate selection
@@ -322,33 +356,48 @@ class SmartLexEngine:
                 raw_text = doc["raw_text"]
                 doc_len = doc["token_count"] or 1
 
-                # 1. Fetch term frequencies for this document
+                # 1. Fetch term frequencies for this document (covering exact terms and synonyms)
                 cursor.execute(f"""
                     SELECT token, frequency 
                     FROM doc_tokens 
                     WHERE doc_id = ? AND token IN ({placeholders})
-                """, [doc_id] + unique_query_terms)
+                """, [doc_id] + all_search_tokens_list)
                 token_freq_rows = cursor.fetchall()
                 term_frequencies = {row["token"]: row["frequency"] for row in token_freq_rows}
 
-                matched_terms = [t for t in unique_query_terms if t in term_frequencies]
-                
-                # --- K: Query-term Coverage ---
-                K = len(matched_terms) / float(num_query_terms)
-
-                # --- S: Local Similarity Score (Normalized TF / BM25-lite) ---
+                matched_terms: List[str] = []
+                term_weights: List[float] = []
                 s_sum = 0.0
                 k1 = 1.2
                 b = 0.75
                 len_norm = (1.0 - b) + b * (doc_len / avg_doc_len) if avg_doc_len > 0 else 1.0
 
                 for t in unique_query_terms:
-                    tf = term_frequencies.get(t, 0)
-                    if tf > 0:
+                    if t in term_frequencies:
+                        # Exact keyword match (weight 1.0)
+                        tf = term_frequencies[t]
+                        term_weights.append(1.0)
+                        matched_terms.append(t)
                         term_score = tf / (tf + k1 * len_norm)
                         s_sum += term_score
+                    else:
+                        # Check synonym matches with attenuation
+                        syns = synonym_map.get(t, [])
+                        syn_matches = [s for s in syns if s in term_frequencies]
+                        if syn_matches:
+                            atten = syn_engine.attenuation
+                            max_syn_tf = max(term_frequencies[s] for s in syn_matches)
+                            eff_tf = atten * max_syn_tf
+                            term_weights.append(atten)
+                            matched_terms.append(f"{t}~{syn_matches[0]}")
+                            term_score = eff_tf / (eff_tf + k1 * len_norm)
+                            s_sum += term_score
 
-                S = min(1.0, s_sum / float(num_query_terms))
+                # --- K: Query-term Coverage (with synonym attenuation) ---
+                K = min(1.0, sum(term_weights) / float(num_query_terms)) if num_query_terms > 0 else 0.0
+
+                # --- S: Local Similarity Score (Normalized TF / BM25-lite) ---
+                S = min(1.0, s_sum / float(num_query_terms)) if num_query_terms > 0 else 0.0
 
                 # --- R: Basic Relationship / Pattern Match ---
                 R = self._compute_relationship_score(raw_text, query_tokens)
@@ -363,7 +412,7 @@ class SmartLexEngine:
                 sentence_rows = cursor.fetchall()
                 sentences = [row["sentence_text"] for row in sentence_rows]
 
-                C, best_sentence, best_sent_matched = self._find_best_sentence(sentences, unique_query_terms)
+                C, best_sentence, best_sent_matched = self._find_best_sentence(sentences, unique_query_terms, synonym_map)
 
                 # --- E: Semantic Embedding Similarity Score ---
                 sem_info = doc_semantic_info.get(doc_id, {"score_e": 0.0, "best_semantic_sentence": ""})
@@ -417,6 +466,12 @@ class SmartLexEngine:
                         f"• E = {E:.3f} (Semantic Similarity: all-MiniLM-L6-v2 local vector cosine)"
                     )
 
+                ai_explanation = None
+                if synthesize_ai:
+                    ai_explanation = OllamaClient.get_instance().synthesize_explanation(
+                        raw_query, doc["filename"], best_sentence
+                    )
+
                 results.append({
                     "doc_id": doc_id,
                     "filename": doc["filename"],
@@ -430,7 +485,8 @@ class SmartLexEngine:
                     "score_e": round(E, 4),
                     "matched_keywords": matched_terms,
                     "snippet": best_sentence,
-                    "explanation": explanation
+                    "explanation": explanation,
+                    "ai_explanation": ai_explanation
                 })
 
             # Sort results descending by final_score, then score_e
@@ -483,10 +539,16 @@ class SmartLexEngine:
 
         return float(matched_pairs) / float(total_pairs)
 
-    def _find_best_sentence(self, sentences: List[str], unique_query_terms: List[str]) -> Tuple[float, str, List[str]]:
+    def _find_best_sentence(
+        self,
+        sentences: List[str],
+        unique_query_terms: List[str],
+        synonym_map: Optional[Dict[str, List[str]]] = None
+    ) -> Tuple[float, str, List[str]]:
         """
         Finds the single sentence that maximizes query-term coverage (C)
         and returns (C_score, best_sentence_text, matched_terms_in_best_sentence).
+        Accounts for exact matches (1.0) and attenuated synonym matches (0.70).
         """
         if not sentences or not unique_query_terms:
             return 0.0, "", []
@@ -496,16 +558,30 @@ class SmartLexEngine:
         best_matched: List[str] = []
 
         total_q = float(len(unique_query_terms))
+        syn_map = synonym_map or {}
 
         for sent in sentences:
             sent_tokens = set(tokenize_text(sent, remove_stopwords=False))
-            matched = [t for t in unique_query_terms if t in sent_tokens]
-            coverage = len(matched) / total_q
+            matched_terms_in_sent: List[str] = []
+            score_acc = 0.0
+
+            for t in unique_query_terms:
+                if t in sent_tokens:
+                    score_acc += 1.0
+                    matched_terms_in_sent.append(t)
+                else:
+                    syns = syn_map.get(t, [])
+                    matching_syns = [s for s in syns if s in sent_tokens]
+                    if matching_syns:
+                        score_acc += 0.70
+                        matched_terms_in_sent.append(f"{t}~{matching_syns[0]}")
+
+            coverage = min(1.0, score_acc / total_q)
 
             if coverage > best_score:
                 best_score = coverage
                 best_sentence = sent
-                best_matched = matched
+                best_matched = matched_terms_in_sent
             elif coverage == best_score and best_score > 0:
                 # Tie-breaker: choose slightly more informative sentence (longer snippet up to 200 chars)
                 if len(sent) > len(best_sentence):
@@ -516,3 +592,15 @@ class SmartLexEngine:
             best_sentence = sentences[0]
 
         return best_score, best_sentence, best_matched
+
+    def synthesize_explanation(self, query: str, res: Dict[str, Any]) -> str:
+        """
+        Synthesize a grounded explanation using local Ollama if available,
+        or grounded extractive passage fallback.
+        """
+        ollama = OllamaClient.get_instance()
+        return ollama.synthesize_explanation(
+            query=query,
+            document_filename=res.get("filename", ""),
+            evidence_snippet=res.get("snippet", "")
+        )

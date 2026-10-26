@@ -1,4 +1,10 @@
 """
-SmartLex-S: Compiler-Inspired Semantic Document Retrieval Engine.
+SmartLex-S: Compiler-Inspired Hybrid Intelligent Retrieval Engine.
 """
-__version__ = "1.0.0"
+from smartlex.engine import SmartLexEngine
+from smartlex.embeddings import EmbeddingEngine
+from smartlex.synonyms import SynonymEngine
+from smartlex.llm import OllamaClient
+
+__version__ = "2.0.0"
+__all__ = ["SmartLexEngine", "EmbeddingEngine", "SynonymEngine", "OllamaClient"]
