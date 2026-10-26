@@ -15,6 +15,7 @@ from smartlex.extractors import (
     count_token_frequencies,
     ExtractionError
 )
+from smartlex.embeddings import EmbeddingEngine
 
 
 class SmartLexEngine:
@@ -64,9 +65,20 @@ class SmartLexEngine:
                     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
                 )
             """)
-            # Indices for rapid lexical lookups
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS doc_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id INTEGER,
+                    sentence_idx INTEGER,
+                    passage_text TEXT,
+                    vector BLOB,
+                    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
+                )
+            """)
+            # Indices for rapid lexical & semantic lookups
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tokens_token ON doc_tokens(token)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentences_doc ON doc_sentences(doc_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_doc ON doc_embeddings(doc_id)")
             conn.commit()
 
     def index_document(self, filepath: str) -> Dict[str, Any]:
@@ -93,6 +105,7 @@ class SmartLexEngine:
                 doc_id = existing["id"]
                 cursor.execute("DELETE FROM doc_tokens WHERE doc_id = ?", (doc_id,))
                 cursor.execute("DELETE FROM doc_sentences WHERE doc_id = ?", (doc_id,))
+                cursor.execute("DELETE FROM doc_embeddings WHERE doc_id = ?", (doc_id,))
                 cursor.execute("""
                     UPDATE documents 
                     SET filepath = ?, file_type = ?, raw_text = ?, token_count = ?, indexed_at = ?
@@ -113,6 +126,20 @@ class SmartLexEngine:
             sentence_rows = [(doc_id, idx, sent) for idx, sent in enumerate(sentences)]
             cursor.executemany("INSERT INTO doc_sentences (doc_id, sentence_idx, sentence_text) VALUES (?, ?, ?)", sentence_rows)
 
+            # Generate and store sentence vector embeddings if model available
+            emb_engine = EmbeddingEngine.get_instance()
+            if emb_engine.is_available() and sentences:
+                vectors = emb_engine.encode_passages(sentences)
+                if vectors is not None:
+                    emb_rows = [
+                        (doc_id, idx, sent, EmbeddingEngine.vector_to_blob(vectors[idx]))
+                        for idx, sent in enumerate(sentences)
+                    ]
+                    cursor.executemany(
+                        "INSERT INTO doc_embeddings (doc_id, sentence_idx, passage_text, vector) VALUES (?, ?, ?, ?)",
+                        emb_rows
+                    )
+
             conn.commit()
 
         return {
@@ -123,6 +150,44 @@ class SmartLexEngine:
             "unique_terms": len(token_freq),
             "sentence_count": len(sentences)
         }
+
+    def backfill_embeddings(self) -> int:
+        """
+        Backfills vector embeddings for any documents in the database that lack embeddings.
+        Returns the number of documents updated.
+        """
+        emb_engine = EmbeddingEngine.get_instance()
+        if not emb_engine.is_available():
+            return 0
+
+        count = 0
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, raw_text FROM documents 
+                WHERE id NOT IN (SELECT DISTINCT doc_id FROM doc_embeddings)
+            """)
+            missing_docs = cursor.fetchall()
+            for doc in missing_docs:
+                doc_id = doc["id"]
+                cursor.execute("SELECT sentence_idx, sentence_text FROM doc_sentences WHERE doc_id = ? ORDER BY sentence_idx ASC", (doc_id,))
+                s_rows = cursor.fetchall()
+                if not s_rows:
+                    continue
+                sentences = [r["sentence_text"] for r in s_rows]
+                vectors = emb_engine.encode_passages(sentences)
+                if vectors is not None:
+                    emb_rows = [
+                        (doc_id, s_rows[idx]["sentence_idx"], sentences[idx], EmbeddingEngine.vector_to_blob(vectors[idx]))
+                        for idx in range(len(sentences))
+                    ]
+                    cursor.executemany(
+                        "INSERT INTO doc_embeddings (doc_id, sentence_idx, passage_text, vector) VALUES (?, ?, ?, ?)",
+                        emb_rows
+                    )
+                    count += 1
+            conn.commit()
+        return count
 
     def get_indexed_documents(self) -> List[Dict[str, Any]]:
         """Retrieve list of all currently indexed documents."""
@@ -142,6 +207,7 @@ class SmartLexEngine:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM doc_tokens WHERE doc_id = ?", (doc_id,))
             cursor.execute("DELETE FROM doc_sentences WHERE doc_id = ?", (doc_id,))
+            cursor.execute("DELETE FROM doc_embeddings WHERE doc_id = ?", (doc_id,))
             cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
             conn.commit()
 
@@ -151,6 +217,7 @@ class SmartLexEngine:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM doc_tokens")
             cursor.execute("DELETE FROM doc_sentences")
+            cursor.execute("DELETE FROM doc_embeddings")
             cursor.execute("DELETE FROM documents")
             conn.commit()
 
@@ -164,11 +231,14 @@ class SmartLexEngine:
                 return float(row["avg_len"])
             return 100.0
 
-    def search(self, query_string: str) -> List[Dict[str, Any]]:
+    def search(self, query_string: str, hybrid_scoring: bool = False) -> List[Dict[str, Any]]:
         """
         Executes compiler-inspired semantic retrieval for a natural-language query.
-        Ranks matching documents using:
-        FinalScore = 0.40 * K + 0.25 * S + 0.20 * R + 0.15 * C
+        Calculates lexical factors (K, S, R, C) and semantic factor (E).
+        If hybrid_scoring is True (Phase 6):
+            FinalScore = 0.25 * K + 0.15 * S + 0.15 * R + 0.15 * C + 0.30 * E
+        Otherwise (Phase 1-3 baseline):
+            FinalScore = 0.40 * K + 0.25 * S + 0.20 * R + 0.15 * C
         """
         raw_query = query_string.strip()
         if not raw_query:
@@ -189,9 +259,14 @@ class SmartLexEngine:
 
         avg_doc_len = self._get_average_doc_length()
 
+        # Semantic query vector computation
+        emb_engine = EmbeddingEngine.get_instance()
+        query_vec = emb_engine.encode_text(raw_query) if emb_engine.is_available() else None
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            # Retrieve documents that match at least one query token
+            
+            # 1. Lexical candidate selection
             placeholders = ",".join("?" for _ in unique_query_terms)
             sql = f"""
                 SELECT DISTINCT d.id, d.filename, d.filepath, d.file_type, d.raw_text, d.token_count
@@ -200,15 +275,50 @@ class SmartLexEngine:
                 WHERE dt.token IN ({placeholders})
             """
             cursor.execute(sql, unique_query_terms)
-            candidate_docs = cursor.fetchall()
+            candidate_map: Dict[int, Dict[str, Any]] = {row["id"]: dict(row) for row in cursor.fetchall()}
 
-            if not candidate_docs:
+            # 2. Semantic candidate selection
+            # Enables retrieving documents for paraphrase queries that have zero exact keyword overlap
+            cursor.execute("SELECT id, filename, filepath, file_type, raw_text, token_count FROM documents")
+            all_docs = {row["id"]: dict(row) for row in cursor.fetchall()}
+
+            # Pre-compute document-level semantic similarity (E) and best semantic sentence
+            doc_semantic_info: Dict[int, Dict[str, Any]] = {}
+            if query_vec is not None:
+                cursor.execute("SELECT doc_id, sentence_idx, passage_text, vector FROM doc_embeddings ORDER BY doc_id, sentence_idx")
+                all_embs = cursor.fetchall()
+
+                grouped_embs: Dict[int, List[Tuple[str, Any]]] = {}
+                for row in all_embs:
+                    d_id = row["doc_id"]
+                    sent_txt = row["passage_text"]
+                    vec = EmbeddingEngine.blob_to_vector(row["vector"])
+                    grouped_embs.setdefault(d_id, []).append((sent_txt, vec))
+
+                for d_id, s_list in grouped_embs.items():
+                    best_sim = 0.0
+                    best_sent = ""
+                    for s_text, s_vec in s_list:
+                        sim = EmbeddingEngine.compute_similarity(query_vec, s_vec)
+                        if sim > best_sim:
+                            best_sim = sim
+                            best_sent = s_text
+                    doc_semantic_info[d_id] = {
+                        "score_e": best_sim,
+                        "best_semantic_sentence": best_sent
+                    }
+
+                    # Include in candidates if notable semantic relevance (>= 0.35) or compact library (<= 100 docs)
+                    if best_sim >= 0.35 or len(all_docs) <= 100:
+                        if d_id in all_docs and d_id not in candidate_map:
+                            candidate_map[d_id] = all_docs[d_id]
+
+            if not candidate_map:
                 return []
 
             results = []
 
-            for doc in candidate_docs:
-                doc_id = doc["id"]
+            for doc_id, doc in candidate_map.items():
                 raw_text = doc["raw_text"]
                 doc_len = doc["token_count"] or 1
 
@@ -224,11 +334,9 @@ class SmartLexEngine:
                 matched_terms = [t for t in unique_query_terms if t in term_frequencies]
                 
                 # --- K: Query-term Coverage ---
-                # Fraction of unique query terms present in the document
                 K = len(matched_terms) / float(num_query_terms)
 
                 # --- S: Local Similarity Score (Normalized TF / BM25-lite) ---
-                # Sublinear saturated term frequency normalized by document length
                 s_sum = 0.0
                 k1 = 1.2
                 b = 0.75
@@ -243,11 +351,9 @@ class SmartLexEngine:
                 S = min(1.0, s_sum / float(num_query_terms))
 
                 # --- R: Basic Relationship / Pattern Match ---
-                # Checks syntactic proximity and co-occurrence of adjacent query tokens
                 R = self._compute_relationship_score(raw_text, query_tokens)
 
                 # --- C: Query-term Coverage in the Best-Matching Sentence ---
-                # Also extracts the best sentence for snippet evidence
                 cursor.execute("""
                     SELECT sentence_text 
                     FROM doc_sentences 
@@ -259,22 +365,57 @@ class SmartLexEngine:
 
                 C, best_sentence, best_sent_matched = self._find_best_sentence(sentences, unique_query_terms)
 
+                # --- E: Semantic Embedding Similarity Score ---
+                sem_info = doc_semantic_info.get(doc_id, {"score_e": 0.0, "best_semantic_sentence": ""})
+                E = sem_info["score_e"]
+                best_sem_sent = sem_info["best_semantic_sentence"]
+
+                # If lexical sentence match is zero, grounded evidence snippet falls back to best semantic sentence
+                if C == 0.0 and best_sem_sent:
+                    best_sentence = best_sem_sent
+
                 # --- Final Score Calculation ---
-                final_score = (0.40 * K) + (0.25 * S) + (0.20 * R) + (0.15 * C)
+                if hybrid_scoring:
+                    # Phase 6 5-factor formula: 0.25*K + 0.15*S + 0.15*R + 0.15*C + 0.30*E
+                    final_score = (0.25 * K) + (0.15 * S) + (0.15 * R) + (0.15 * C) + (0.30 * E)
+                    formula_str = "0.25*K + 0.15*S + 0.15*R + 0.15*C + 0.30*E"
+                else:
+                    # Baseline 4-factor formula: 0.40*K + 0.25*S + 0.20*R + 0.15*C
+                    final_score = (0.40 * K) + (0.25 * S) + (0.20 * R) + (0.15 * C)
+                    formula_str = "0.40*K + 0.25*S + 0.20*R + 0.15*C"
+
+                final_score = max(0.0, min(1.0, final_score))
 
                 # Detailed explanation for transparency and faculty evaluation
-                explanation = (
-                    f"Final Score: {final_score:.4f} ({final_score*100:.1f}%)\n"
-                    f"Formula: 0.40*K + 0.25*S + 0.20*R + 0.15*C\n\n"
-                    f"• K = {K:.3f} (Coverage: {len(matched_terms)}/{num_query_terms} query terms found)\n"
-                    f"  Weighted: 0.40 * {K:.3f} = {0.40 * K:.4f}\n\n"
-                    f"• S = {S:.3f} (Local TF-Similarity: normalized term density)\n"
-                    f"  Weighted: 0.25 * {S:.3f} = {0.25 * S:.4f}\n\n"
-                    f"• R = {R:.3f} (Relationship: token pair proximity / collocation)\n"
-                    f"  Weighted: 0.20 * {R:.3f} = {0.20 * R:.4f}\n\n"
-                    f"• C = {C:.3f} (Best Sentence Coverage: {len(best_sent_matched)}/{num_query_terms} terms in single sentence)\n"
-                    f"  Weighted: 0.15 * {C:.3f} = {0.15 * C:.4f}"
-                )
+                if hybrid_scoring:
+                    explanation = (
+                        f"Final Score: {final_score:.4f} ({final_score*100:.1f}%)\n"
+                        f"Formula: {formula_str}\n\n"
+                        f"• K = {K:.3f} (Coverage: {len(matched_terms)}/{num_query_terms} query terms found)\n"
+                        f"  Weighted: 0.25 * {K:.3f} = {0.25 * K:.4f}\n\n"
+                        f"• S = {S:.3f} (Local TF-Similarity: normalized term density)\n"
+                        f"  Weighted: 0.15 * {S:.3f} = {0.15 * S:.4f}\n\n"
+                        f"• R = {R:.3f} (Relationship: token pair proximity / collocation)\n"
+                        f"  Weighted: 0.15 * {R:.3f} = {0.15 * R:.4f}\n\n"
+                        f"• C = {C:.3f} (Best Sentence Coverage: {len(best_sent_matched)}/{num_query_terms} terms in single sentence)\n"
+                        f"  Weighted: 0.15 * {C:.3f} = {0.15 * C:.4f}\n\n"
+                        f"• E = {E:.3f} (Semantic Embedding: local all-MiniLM-L6-v2 cosine similarity)\n"
+                        f"  Weighted: 0.30 * {E:.3f} = {0.30 * E:.4f}"
+                    )
+                else:
+                    explanation = (
+                        f"Final Score: {final_score:.4f} ({final_score*100:.1f}%)\n"
+                        f"Formula: {formula_str}\n\n"
+                        f"• K = {K:.3f} (Coverage: {len(matched_terms)}/{num_query_terms} query terms found)\n"
+                        f"  Weighted: 0.40 * {K:.3f} = {0.40 * K:.4f}\n\n"
+                        f"• S = {S:.3f} (Local TF-Similarity: normalized term density)\n"
+                        f"  Weighted: 0.25 * {S:.3f} = {0.25 * S:.4f}\n\n"
+                        f"• R = {R:.3f} (Relationship: token pair proximity / collocation)\n"
+                        f"  Weighted: 0.20 * {R:.3f} = {0.20 * R:.4f}\n\n"
+                        f"• C = {C:.3f} (Best Sentence Coverage: {len(best_sent_matched)}/{num_query_terms} terms in single sentence)\n"
+                        f"  Weighted: 0.15 * {C:.3f} = {0.15 * C:.4f}\n\n"
+                        f"• E = {E:.3f} (Semantic Similarity: all-MiniLM-L6-v2 local vector cosine)"
+                    )
 
                 results.append({
                     "doc_id": doc_id,
@@ -286,13 +427,14 @@ class SmartLexEngine:
                     "score_s": round(S, 4),
                     "score_r": round(R, 4),
                     "score_c": round(C, 4),
+                    "score_e": round(E, 4),
                     "matched_keywords": matched_terms,
                     "snippet": best_sentence,
                     "explanation": explanation
                 })
 
-            # Sort results descending by final_score
-            results.sort(key=lambda x: x["final_score"], reverse=True)
+            # Sort results descending by final_score, then score_e
+            results.sort(key=lambda x: (x["final_score"], x.get("score_e", 0.0)), reverse=True)
             return results
 
     def _compute_relationship_score(self, text: str, query_tokens: List[str]) -> float:
